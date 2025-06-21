@@ -1,0 +1,22 @@
+data: "data/full_data.csv"
+seed: 42
+n_trials: 10
+pt: 1.0
+sl: 1.0
+vertical: 12
+n_splits: 5
+train_size: 0.7
+threshold: 0.5
+
+# LightGBM hyperparameters (set to null to use Optuna search)
+hyperparameters:
+  n_estimators: null
+  learning_rate: null
+  num_leaves: null
+  max_depth: null
+  lambda_l1: null
+  lambda_l2: null
+  feature_fraction: null
+  bagging_fraction: null
+  bagging_freq: null
+  min_child_samples: null
