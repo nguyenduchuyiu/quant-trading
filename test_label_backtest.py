@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from pipeline import FinancialMLPipeline
 from utils.config import load_config
 from utils.logging import log_info, log_section, log_subsection
-from modeling.backtest import run_vectorized_backtest, run_signal_analysis
+from modeling.backtest import run_event_driven_backtest, run_signal_analysis
 
 
 def test_label_quality_via_backtest(config_path="configs/default.yaml"):
@@ -90,20 +90,26 @@ def test_label_quality_via_backtest(config_path="configs/default.yaml"):
     
     # 5. Run signal analysis
     log_subsection("Signal Analysis")
-    signal_analysis = run_signal_analysis(signals)
+    run_signal_analysis(signals)
     
     # 6. Run backtest với labels làm signals
     log_subsection("Backtesting Label Quality")
     
-    initial_capital = getattr(config, 'initial_capital', 100000.0)
-    transaction_cost = getattr(config, 'transaction_cost_pct', 0.001)
+    initial_capital = getattr(config, 'initial_capital')
+    transaction_cost = getattr(config, 'transaction_cost_pct')
+    pt_sl_multipliers = [getattr(config, 'pt'), getattr(config, 'sl')]
+    risk_fraction = getattr(config, 'risk_fraction')
+    long_only = getattr(config, 'long_only')
     
-    backtest_results = run_vectorized_backtest(
+    backtest_results = run_event_driven_backtest(
         signals=signals,
-        asset_log_returns=log_returns,
+        full_df=pipeline.final_dataset,
+        pt_sl_multipliers=pt_sl_multipliers,
         initial_capital=initial_capital,
+        risk_fraction=risk_fraction,
         transaction_cost_pct=transaction_cost,
-        full_returns=full_returns  # Pass full returns for proper buy-and-hold
+        long_only=long_only,
+        full_returns=full_returns
     )
     
     # 7. Phân tích kết quả

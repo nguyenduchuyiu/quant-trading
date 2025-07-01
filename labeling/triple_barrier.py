@@ -153,10 +153,10 @@ def run_labeling_pipeline(features_df: pd.DataFrame, dollar_bars_df: pd.DataFram
     
     # Event sampling
     vol_short_window, vol_long_window = 12, 48
-    # t_events = get_volatility_breakout_events(
-    #     features_df['log_returns'], vol_short_window, vol_long_window
-    # )
-    t_events = features_df.index #FIXME: use all data as events
+    t_events = get_volatility_breakout_events(
+        features_df['log_returns'], vol_short_window, vol_long_window
+    )
+    # t_events = features_df.index 
     t_events = t_events[t_events.isin(features_df.index)]
     log_info(f"-> Identified {len(t_events)} trading events.\n")
     
@@ -199,7 +199,11 @@ def run_labeling_pipeline(features_df: pd.DataFrame, dollar_bars_df: pd.DataFram
     final_df = final_df.loc[labels_df.index].copy()
     final_df.dropna(subset=['label'], inplace=True)
     final_df['label'] = final_df['label'].astype(int)
-    
+    final_df = final_df.reset_index().merge(
+        dollar_bars_df.reset_index(),
+        left_on='t0', right_on='date_time', how='left'
+    ).set_index('t0')    
+    final_df['target_vol'] = target_volatility.loc[final_df.index]
     # Display results
     log_section("FINAL RESULT")
     print(final_df.head(10))

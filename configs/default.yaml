@@ -3,12 +3,12 @@
 # Data settings
 data: "data/full_data.csv"
 seed: 42
-threshold: null  # Dollar bar threshold (auto-calculate if null)
+desired_num_bars: 100000
 
 # Labeling parameters
-pt: 1.0    # Profit taking multiplier
-sl: 1.0    # Stop loss multiplier
-vertical: 1  # Number of bars for vertical barrier
+pt: 2.0    # Profit taking multiplier
+sl: 2.0    # Stop loss multiplier
+vertical: 12  # Number of bars for vertical barrier
 
 # Model optimization
 n_trials: 30   # Number of Optuna trials
@@ -18,6 +18,9 @@ train_size: 0.8  # Fraction of data for training
 # Backtesting parameters
 initial_capital: 100000.0  # Starting capital for backtesting
 transaction_cost_pct: 0.001  # Transaction cost as percentage (0.1%)
+long_only: false  # If true, treat sell signals as exit signals
+risk_fraction: 1  # Risk fraction for backtesting
+
 
 # Optional: Pre-configured hyperparameters (set to null to use Optuna)
 # hyperparameters:

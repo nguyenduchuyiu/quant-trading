@@ -6,131 +6,210 @@ Backtesting utilities for the financial ML pipeline.
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from utils.logging import log_info, log_section, log_subsection
 
 
-def run_vectorized_backtest(signals: pd.Series, 
-                           asset_log_returns: pd.Series, 
-                           initial_capital: float = 100000.0,
-                           transaction_cost_pct: float = 0.001,
-                           full_returns: pd.Series = None) -> dict:
+
+def run_event_driven_backtest(
+    signals: pd.Series,
+    full_df: pd.DataFrame,
+    pt_sl_multipliers: list,
+    initial_capital: float,
+    risk_fraction: float,
+    transaction_cost_pct: float,
+    long_only: bool = False,
+    full_returns: pd.Series = None
+):
     """
-    Performs a vectorized backtest on a set of trading signals.
+    Performs a proper event-driven backtest and returns a comprehensive set of metrics.
 
     Args:
-        signals (pd.Series): Series of trading signals (1: Buy, -1: Sell, 0: Hold) 
-                             with a DatetimeIndex.
-        asset_log_returns (pd.Series): Series of asset log returns with a matching 
-                                       DatetimeIndex.
-        initial_capital (float): The starting capital for the simulation.
-        transaction_cost_pct (float): The percentage cost per transaction (e.g., 0.001 for 0.1%).
-        full_returns (pd.Series): Full asset returns for buy-and-hold comparison (optional)
-        
+        signals (pd.Series): The trading signals series.
+        full_df (pd.DataFrame): The DataFrame from the labeling pipeline.
+                                  Must contain 'label', 't1', and 'target_vol'.
+        close_prices (pd.Series): The series of close prices, indexed by datetime.
+        pt_sl_multipliers (list): The [pt, sl] multipliers used to generate the labels.
+        initial_capital (float): The starting capital.
+        risk_fraction (float): The fraction of equity to risk per trade (position sizing).
+        transaction_cost_pct (float): The transaction cost as percentage (0.1%).
+        long_only (bool): If True, treats SELL signals (-1) as EXIT signals (0).
+        full_returns (pd.Series): The full, unfiltered log returns of the asset for
+                                  a correct Buy and Hold comparison.
+
     Returns:
-        dict: Dictionary containing backtest results and performance metrics
+        dict: A comprehensive dictionary of performance metrics and data series.
     """
+    print("--- Running Correct Event-Driven Backtest for TBM Labels ---")
+    if long_only:
+        print("Mode: Long-Only (SELL signals will be treated as EXIT)")
 
-    # --- 1. Align data and create positions ---
-    # Đảm bảo signals và returns có cùng index
-    aligned_returns, aligned_signals = asset_log_returns.align(signals, join='right', fill_value=0.0)
-    
-    # Giữ vị thế cho đến khi có tín hiệu mới
-    positions = aligned_signals.ffill().fillna(0)
+    if long_only:
+        signals[signals == -1] = 0
 
-    # --- 2. Calculate strategy returns & costs ---
-    # Lợi nhuận gộp: vị thế ngày hôm trước * lợi nhuận tài sản ngày hôm nay
-    gross_strategy_log_returns = positions.shift(1) * aligned_returns
+    # Portfolio tracking
+    close_prices = full_df['close']
+    equity = initial_capital
+    start_date = full_df.index[0] if not full_df.empty else close_prices.index[0]
+    equity_history = [{'date': start_date, 'equity': initial_capital}]
+    positions_history = [{'date': start_date, 'position': 0}] # For tracking positions over time
     
-    # Chi phí: xảy ra khi vị thế thay đổi
-    trades = positions.diff().abs()
-    costs = trades * transaction_cost_pct
-    
-    # Lợi nhuận ròng
-    net_strategy_log_returns = gross_strategy_log_returns - costs
-    
-    # --- 3. Create equity curve ---
-    cumulative_net_returns = net_strategy_log_returns.cumsum().apply(np.exp)
-    equity_curve = initial_capital * cumulative_net_returns
+    num_trades, wins = 0, 0
+    pct_returns = []
 
-    # --- 4. Calculate Key Performance Indicators (KPIs) ---
+    for t0, signal_to_act_on in tqdm(signals.items(), desc="Simulating TBM Trades"):
+        if signal_to_act_on == 0:
+            continue
+        
+        num_trades += 1
+        positions_history.append({'date': t0, 'position': signal_to_act_on}) # Record entry
+        
+        label_info = full_df.loc[t0]
+        trade_outcome = label_info['label']
+        pct_return = 0.0
+
+        if signal_to_act_on == 1:
+            if trade_outcome == 1:
+                pct_return = pt_sl_multipliers[0] * label_info['target_vol']
+                wins += 1
+            elif trade_outcome == -1:
+                pct_return = -pt_sl_multipliers[1] * label_info['target_vol']
+            else:
+                entry_price = close_prices.get(t0)
+                exit_price = close_prices.get(label_info['t1'])
+                if entry_price and exit_price and entry_price != 0:
+                    pct_return = (exit_price / entry_price) - 1
+                    if pct_return > 0: wins += 1
+        elif signal_to_act_on == -1:
+            if trade_outcome == 1:
+                pct_return = -pt_sl_multipliers[0] * label_info['target_vol']
+            elif trade_outcome == -1:
+                pct_return = pt_sl_multipliers[1] * label_info['target_vol']
+                wins += 1
+            else:
+                entry_price = close_prices.get(t0)
+                exit_price = close_prices.get(label_info['t1'])
+                if entry_price and exit_price and exit_price != 0:
+                    pct_return = (entry_price / exit_price) - 1
+                    if pct_return > 0: wins += 1
+        
+        capital_to_invest = equity * risk_fraction
+        dollar_pnl = capital_to_invest * pct_return
+        dollar_pnl -= (capital_to_invest * 2 * transaction_cost_pct)
+        equity += dollar_pnl
+        
+        if equity <= 0:
+            print(f"BANKRUPTCY at {label_info['t1']}! Simulation stopped.")
+            equity = 0
+            equity_history.append({'date': label_info['t1'], 'equity': equity})
+            positions_history.append({'date': label_info['t1'], 'position': 0})
+            break
+        
+        equity_history.append({'date': label_info['t1'], 'equity': equity})
+        positions_history.append({'date': label_info['t1'], 'position': 0}) # Record exit
+        pct_returns.append({'date': t0, 'pct_return': pct_return})
+
+    # --- Finalize and Analyze Results ---
+    equity_curve = pd.DataFrame(equity_history).set_index('date')['equity'].sort_index()
+    equity_curve = equity_curve.resample('D').last().ffill()
+
+    if len(equity_curve) < 2:
+        print("Error: Not enough data to calculate performance.")
+        return {}
+
+    # --- Calculate KPIs ---
     total_return = (equity_curve.iloc[-1] / initial_capital) - 1
-    num_days = len(equity_curve)
-    trading_days_per_year = 252  # Giả định có 252 ngày giao dịch trong năm
-    annualized_return = (1 + total_return) ** (trading_days_per_year / num_days) - 1
+    net_daily_log_returns = np.log(equity_curve / equity_curve.shift(1)).fillna(0)
     
-    annualized_volatility = net_strategy_log_returns.std() * np.sqrt(trading_days_per_year)
-    
-    # Giả sử tỷ lệ phi rủi ro = 0
-    sharpe_ratio = annualized_return / annualized_volatility if annualized_volatility != 0 else 0
-    
-    # Tính Max Drawdown
+    if net_daily_log_returns.std() == 0:
+        sharpe_ratio, annualized_return, annualized_volatility = 0, 0, 0
+    else:
+        annualized_volatility = net_daily_log_returns.std() * np.sqrt(252)
+        annualized_return = np.expm1(net_daily_log_returns.mean() * 252)
+        sharpe_ratio = annualized_return / annualized_volatility
+
     running_max = equity_curve.cummax()
     drawdown = (equity_curve - running_max) / running_max
     max_drawdown = drawdown.min()
-    
-    # Tính thêm một số metrics khác
-    num_trades = int(trades.sum())
-    win_rate = calculate_win_rate(net_strategy_log_returns, positions)
-    
-    # --- 5. Print performance summary ---
-    log_subsection("Backtest Performance Summary")
-    log_info(f"Initial Capital:       ${initial_capital:,.2f}")
-    log_info(f"Final Capital:         ${equity_curve.iloc[-1]:,.2f}")
-    log_info(f"Total Return:          {total_return:.2%}")
-    log_info(f"Annualized Return:     {annualized_return:.2%}")
-    log_info(f"Annualized Volatility: {annualized_volatility:.2%}")
-    log_info(f"Sharpe Ratio:          {sharpe_ratio:.2f}")
-    log_info(f"Maximum Drawdown:      {max_drawdown:.2%}")
-    log_info(f"Number of Trades:      {num_trades}")
-    log_info(f"Win Rate:              {win_rate:.2f}%")
+    win_rate = (wins / num_trades) * 100 if num_trades > 0 else 0
 
-    # --- 6. Calculate Buy and Hold comparison ---
-    # Sử dụng full_returns nếu có, nếu không thì dùng aligned_returns
+    # --- Construct Positions Series ---
+    positions_df = pd.DataFrame(positions_history).set_index('date').sort_index()
+    positions = positions_df['position'].resample('D').last().ffill().fillna(0)
+
+    # --- Calculate Buy and Hold Comparison ---
+    bnh_total_return = 0.0
+    buy_and_hold_curve = pd.Series(initial_capital, index=equity_curve.index)
     if full_returns is not None:
-        # Tính buy and hold từ start date của strategy đến end date
         strategy_start = equity_curve.index[0]
         strategy_end = equity_curve.index[-1]
-        
-        # Lấy full returns trong khoảng thời gian strategy
-        bnh_returns = full_returns.loc[strategy_start:strategy_end]
-        
-        if len(bnh_returns) > 0:
-            buy_and_hold_returns = initial_capital * bnh_returns.cumsum().apply(np.exp)
-            # Align với strategy timeline
-            buy_and_hold_returns = buy_and_hold_returns.reindex(equity_curve.index, method='ffill')
-        else:
-            # Fallback nếu không có data
-            buy_and_hold_returns = initial_capital * aligned_returns.cumsum().apply(np.exp)
-    else:
-        # Fallback to original method
-        buy_and_hold_returns = initial_capital * aligned_returns.cumsum().apply(np.exp)
+        bnh_returns_slice = full_returns.loc[strategy_start:strategy_end]
+        if not bnh_returns_slice.empty:
+            buy_and_hold_curve = initial_capital * np.exp(bnh_returns_slice.cumsum())
+            buy_and_hold_curve = buy_and_hold_curve.reindex(equity_curve.index, method='ffill').fillna(initial_capital)
+            bnh_total_return = (buy_and_hold_curve.iloc[-1] / initial_capital) - 1
 
-    # Calculate buy and hold metrics
-    bnh_total_return = (buy_and_hold_returns.iloc[-1] / initial_capital) - 1 if len(buy_and_hold_returns) > 0 else 0
-    
-    # --- 7. Plot results ---
-    plt.figure(figsize=(14, 7))
-    equity_curve.plot(label='Strategy Equity Curve', lw=2, color='blue')
-    buy_and_hold_returns.plot(label=f'Buy and Hold ({bnh_total_return:.1%})', lw=2, linestyle='--', color='orange')
-    plt.title(f'Strategy Performance vs. Buy and Hold (Strategy: {total_return:.1%}, Sharpe: {sharpe_ratio:.2f})')
-    plt.xlabel('Date')
-    plt.ylabel('Portfolio Value ($)')
+    # --- Calculate Buy & Hold Drawdown ---
+    bnh_running_max = buy_and_hold_curve.cummax()
+    bnh_drawdown = (buy_and_hold_curve - bnh_running_max) / bnh_running_max
+    bnh_max_drawdown = bnh_drawdown.min()
+
+    # --- Print Summary & Plot ---
+    print("\n--- Event-Driven Backtest Performance ---")
+    print(f"Max Drawdown: {max_drawdown:.2%}")
+    print(f"Max Drawdown (Buy & Hold): {bnh_max_drawdown:.2%}")
+    print(f"Win Rate: {win_rate:.1f}%")
+    print(f"Total Trades: {num_trades}")
+    print(f"Total Wins: {wins}")
+    print(f"Total Losses: {num_trades - wins}")
+    print(f"Total Returns: {total_return:.2%}")
+    print(f"Annualized Return: {annualized_return:.2%}")
+
+    # --- Plotting ---
+
+    # 1. Biểu đồ tăng trưởng vốn (Equity Curve)
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(15, 6))
+    plt.plot(equity_curve, label='Strategy Equity Curve', lw=2, color='darkcyan')
+    plt.plot(buy_and_hold_curve, label=f'Buy and Hold ({bnh_total_return:.1%})', lw=2, color='orange')
+    plt.title(f'Equity Curve (Sharpe: {sharpe_ratio:.2f})', fontsize=16)
+    plt.ylabel('Equity')
     plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-    
-    # Plot drawdown
-    plt.figure(figsize=(14, 5))
-    drawdown.plot(kind='area', color='red', alpha=0.3)
-    plt.title('Strategy Drawdown')
-    plt.xlabel('Date')
-    plt.ylabel('Drawdown')
-    plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
 
-    # --- 8. Return results dictionary ---
+    # 2. Biểu đồ drawdown (area fill, màu sắc như yêu cầu)
+    plt.figure(figsize=(15, 4))
+    # Drawdown strategy: xanh dương
+    plt.fill_between(drawdown.index, drawdown, 0, color='dodgerblue', alpha=0.3, label='Strategy Drawdown')
+    plt.plot(drawdown, color='dodgerblue', lw=1.5)
+    # Drawdown buy & hold: cam
+    plt.fill_between(bnh_drawdown.index, bnh_drawdown, 0, color='orange', alpha=0.3, label='Buy & Hold Drawdown')
+    plt.plot(bnh_drawdown, color='orange', lw=1.5)
+    plt.title('Drawdown')
+    plt.ylabel('Drawdown')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # 3. Biểu đồ đường pct_return từng trade và transaction_cost_pct (đường ngang)
+    pct_returns_df = pd.DataFrame(pct_returns).set_index('date')
+    # Tính net return per trade (sau phí)
+    net_returns = pct_returns_df['pct_return'] - 2 * transaction_cost_pct
+
+    # Vẽ biểu đồ Net Return per Trade theo thời gian
+    plt.figure(figsize=(15, 5))
+    plt.plot(net_returns.index, net_returns, color='green', alpha=0.7, label='Net Return per Trade (after fee)')
+    plt.axhline(0, color='red', label='Break-even')
+    plt.title("Net Return per Trade vs. Time")
+    plt.xlabel("Trade Date")
+    plt.ylabel("Net Return")
+    plt.legend()
+    plt.grid(True, linestyle=':')
+    plt.tight_layout()
+    plt.show()
+    
+    # --- Return Comprehensive Dictionary ---
     results = {
         'initial_capital': initial_capital,
         'final_capital': equity_curve.iloc[-1],
@@ -144,12 +223,14 @@ def run_vectorized_backtest(signals: pd.Series,
         'equity_curve': equity_curve,
         'drawdown': drawdown,
         'positions': positions,
-        'net_returns': net_strategy_log_returns,
+        'net_returns': net_daily_log_returns,
         'buy_and_hold_return': bnh_total_return,
-        'buy_and_hold_curve': buy_and_hold_returns
+        'buy_and_hold_curve': buy_and_hold_curve,
+        'pct_returns': pct_returns_df,
+        'net_returns_per_trade': net_returns,
     }
-    
     return results
+
 
 
 def calculate_win_rate(returns: pd.Series, positions: pd.Series) -> float:

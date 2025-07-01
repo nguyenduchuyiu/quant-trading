@@ -13,7 +13,7 @@ from features.engineering import run_feature_engineering_pipeline
 from labeling.triple_barrier import run_labeling_pipeline
 from modeling.optimizer import run_hyperparameter_optimization
 from modeling.trainer import run_out_of_sample_test, run_meta_labeling_pipeline, generate_signals_from_models
-from modeling.backtest import run_vectorized_backtest, run_signal_analysis
+from modeling.backtest import run_event_driven_backtest, run_signal_analysis
 from utils.logging import log_info, log_subsection, log_warning, log_error, log_section
 from utils.config import load_config, get_hyperparameter_config
 
@@ -58,7 +58,7 @@ class FinancialMLPipeline:
             return
             
         self.features, self.dollar_bars = run_feature_engineering_pipeline(
-            self.raw_df, threshold=getattr(self.config, 'threshold', None)
+            self.raw_df, config=self.config
         )
         
         if self.features.empty:
@@ -228,7 +228,7 @@ class FinancialMLPipeline:
             full_returns = self.dollar_bars['log_returns']
         
         # Run backtest
-        backtest_results = run_vectorized_backtest(
+        backtest_results = run_event_driven_backtest(
             signals=signals,
             asset_log_returns=log_returns,
             initial_capital=initial_capital,

@@ -117,7 +117,7 @@ def add_lagged_features(df: pd.DataFrame, lag_cols: list, lags: list = [1, 2, 3]
     return new_df
 
 
-def run_feature_engineering_pipeline(df: pd.DataFrame, threshold=None) -> tuple:
+def run_feature_engineering_pipeline(df: pd.DataFrame, config) -> tuple:
     """
     Executes the full feature engineering and preprocessing pipeline.
     
@@ -134,9 +134,11 @@ def run_feature_engineering_pipeline(df: pd.DataFrame, threshold=None) -> tuple:
 
     # Calculate dollar volume and threshold
     df['dollar_volume'] = df['close'] * df['volume']
-    avg_dollar_volume = df['dollar_volume'].mean()
-    dollar_bar_threshold = threshold if threshold is not None else avg_dollar_volume * 1.5
-
+    desired_num_bars = getattr(config, 'desired_num_bars')
+    total_dollar_volume = df['dollar_volume'].sum()
+    dollar_bar_threshold = total_dollar_volume / desired_num_bars
+    log_info(f"-> Dollar bar threshold: {dollar_bar_threshold}")
+    
     # Create dollar bars
     dollar_bars = get_dollar_bars(df.reset_index(), threshold=dollar_bar_threshold)
     if dollar_bars.empty:
