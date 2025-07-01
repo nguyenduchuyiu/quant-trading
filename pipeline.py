@@ -91,8 +91,13 @@ class FinancialMLPipeline:
             return
             
         # Prepare data for modeling
-        feature_cols = [c for c in self.final_dataset.columns if c not in ['label', 'weight', 't1']]
-        X = self.final_dataset[feature_cols]
+        datetime_cols = self.final_dataset.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns.tolist()
+        feature_to_drop = ['label', 'weight', 'open', 'high', 'low', 'close', 'volume']
+        feature_to_drop += datetime_cols
+        feature_cols = [col for col in self.final_dataset.columns if col not in feature_to_drop]
+        self.training_features = feature_cols
+        
+        X = self.final_dataset[self.training_features]
         y = self.final_dataset['label']
         weights = self.final_dataset['weight']
         t1 = self.final_dataset['t1']
@@ -123,9 +128,8 @@ class FinancialMLPipeline:
             log_error("No optimized parameters available. Please run optimization first.")
             return
             
-        # Prepare data
-        feature_cols = [c for c in self.final_dataset.columns if c not in ['label', 'weight', 't1']]
-        X = self.final_dataset[feature_cols]
+        # Prepare data       
+        X = self.final_dataset[self.training_features]
         y = self.final_dataset['label']
         weights = self.final_dataset['weight']
         
@@ -154,16 +158,13 @@ class FinancialMLPipeline:
         initial_capital = getattr(self.config, 'initial_capital', 100000.0)
         transaction_cost = getattr(self.config, 'transaction_cost_pct', 0.001)
         
-        # Store training features for later use
-        self.training_features = [c for c in self.final_dataset.columns if c not in ['label', 'weight', 't1']]
-            
+        # Store training features for later use            
         self.meta_results = run_meta_labeling_pipeline(
             self.final_dataset, 
+            self.training_features,
             self.best_params, 
             self.primary_model, 
             train_size=getattr(self.config, 'train_size', 0.8),
-            initial_capital=initial_capital,
-            transaction_cost_pct=transaction_cost
         )
         
         log_info("Meta-labeling completed.")
@@ -209,7 +210,7 @@ class FinancialMLPipeline:
                     self.primary_model, 
                     meta_model, 
                     best_threshold,
-                    training_features=self.training_features  # Pass training features for alignment
+                    training_features=self.training_features
                 )
                 log_returns = self.final_dataset['log_returns']
             else:
@@ -227,12 +228,21 @@ class FinancialMLPipeline:
         if self.dollar_bars is not None and 'log_returns' in self.dollar_bars.columns:
             full_returns = self.dollar_bars['log_returns']
         
+        initial_capital = getattr(self.config, 'initial_capital')
+        transaction_cost = getattr(self.config, 'transaction_cost_pct')
+        pt_sl_multipliers = [getattr(self.config, 'pt'), getattr(self.config, 'sl')]
+        risk_fraction = getattr(self.config, 'risk_fraction')
+        long_only = getattr(self.config, 'long_only')
+    
         # Run backtest
         backtest_results = run_event_driven_backtest(
             signals=signals,
-            asset_log_returns=log_returns,
+            full_df=self.final_dataset,
+            pt_sl_multipliers=pt_sl_multipliers,
             initial_capital=initial_capital,
+            risk_fraction=risk_fraction,
             transaction_cost_pct=transaction_cost,
+            long_only=long_only,
             full_returns=full_returns  # Pass full returns for proper buy-and-hold
         )
         

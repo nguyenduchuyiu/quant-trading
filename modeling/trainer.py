@@ -75,9 +75,7 @@ def run_out_of_sample_test(X, y, weights, best_params, train_size=0.8) -> lgb.LG
     return primary_model
 
 
-def run_meta_labeling_pipeline(final_dataset, best_params, primary_model_oos, train_size=0.8, 
-                                initial_capital=100000.0, 
-                              transaction_cost_pct=0.001) -> dict:
+def run_meta_labeling_pipeline(final_dataset, training_features, best_params, primary_model_oos, train_size=0.8) -> dict:
     """
     Builds and evaluates a meta-model to filter primary model signals, with optional backtesting.
     
@@ -95,9 +93,8 @@ def run_meta_labeling_pipeline(final_dataset, best_params, primary_model_oos, tr
     """
     log_section("Stage 5: Meta-Labeling for Precision Improvement")
     
-    # Prepare data
-    feature_cols = [c for c in final_dataset.columns if c not in ['label', 'weight', 't1']]
-    X = final_dataset[feature_cols]
+
+    X = final_dataset[training_features]
     y = final_dataset['label']
     weights = final_dataset['weight']
     t1 = final_dataset['t1']
@@ -261,8 +258,10 @@ def generate_signals_from_models(dataset, primary_model, meta_model=None, best_t
         # Use the exact same features as training
         feature_cols = training_features
     else:
-        # Fallback to auto-detection (may cause issues)
-        feature_cols = [c for c in dataset.columns if c not in ['label', 'weight', 't1', 'log_returns']]
+        datetime_cols = dataset.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns.tolist()
+        feature_to_drop = ['label', 'weight', 'open', 'high', 'low', 'close', 'volume']
+        feature_to_drop += datetime_cols
+        feature_cols = [col for col in dataset.columns if col not in feature_to_drop]
     
     # Ensure all required features are present
     available_features = [f for f in feature_cols if f in dataset.columns]

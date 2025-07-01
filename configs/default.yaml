@@ -3,7 +3,7 @@
 # Data settings
 data: "data/full_data.csv"
 seed: 42
-desired_num_bars: 100000
+desired_num_bars: 1000000
 
 # Labeling parameters
 pt: 2.0    # Profit taking multiplier
