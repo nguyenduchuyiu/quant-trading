@@ -6,9 +6,9 @@ seed: 42
 threshold: null  # Dollar bar threshold (auto-calculate if null)
 
 # Labeling parameters
-pt: 1.0    # Profit taking multiplier
+pt: 3.0    # Profit taking multiplier
 sl: 1.0    # Stop loss multiplier
-vertical: 1  # Number of bars for vertical barrier
+vertical: 12  # Number of bars for vertical barrier
 
 # Model optimization
 n_trials: 30   # Number of Optuna trials
@@ -19,19 +19,8 @@ train_size: 0.8  # Fraction of data for training
 initial_capital: 100000.0  # Starting capital for backtesting
 transaction_cost_pct: 0.001  # Transaction cost as percentage (0.1%)
 
-# Optional: Pre-configured hyperparameters (set to null to use Optuna)
-# hyperparameters:
-#   n_estimators: null
-#   learning_rate: null
-#   num_leaves: null
-#   max_depth: null
-#   lambda_l1: null
-#   lambda_l2: null
-#   feature_fraction: null
-#   bagging_fraction: null
-#   bagging_freq: null
-#   min_child_samples: null
 
+# Optional: Pre-configured hyperparameters (set to null to use Optuna)
 hyperparameters:
   n_estimators: 447
   learning_rate: 0.08013346658513963

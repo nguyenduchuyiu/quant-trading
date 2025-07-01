@@ -232,6 +232,8 @@ def run_labeling_pipeline(features_df: pd.DataFrame, dollar_bars_df: pd.DataFram
     log_section("Stage 2: Labeling & Data Preparation")
     vol_short_window, vol_long_window = 12, 48
     t_events = get_volatility_breakout_events(features_df['log_returns'], vol_short_window, vol_long_window)
+    # t_events = features_df.index
+    
     t_events = t_events[t_events.isin(features_df.index)]
     log_info(f"-> Identified {len(t_events)} trading events.\n")
     if len(t_events) == 0:
