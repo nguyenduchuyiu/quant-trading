@@ -53,6 +53,7 @@ def run_event_driven_backtest(
     start_date = full_df.index[0] if not full_df.empty else close_prices.index[0]
     equity_history = [{'date': start_date, 'equity': initial_capital}]
     positions_history = [{'date': start_date, 'position': 0}] # For tracking positions over time
+    full_returns = full_returns.loc[start_date:]
     
     num_trades, wins = 0, 0
     pct_returns = []

@@ -154,10 +154,6 @@ class FinancialMLPipeline:
             log_error("Primary model not available. Please run model evaluation first.")
             return
         
-        # Get backtest config from pipeline config
-        initial_capital = getattr(self.config, 'initial_capital', 100000.0)
-        transaction_cost = getattr(self.config, 'transaction_cost_pct', 0.001)
-        
         # Store training features for later use            
         self.meta_results = run_meta_labeling_pipeline(
             self.final_dataset, 
@@ -181,10 +177,6 @@ class FinancialMLPipeline:
             log_error("Primary model and dataset required for backtesting.")
             return
         
-        # Get backtest config
-        initial_capital = getattr(self.config, 'initial_capital', 100000.0)
-        transaction_cost = getattr(self.config, 'transaction_cost_pct', 0.001)
-        
         if signals is None:
             # Generate signals based on dataset range
             if dataset_range == 'test':
@@ -193,9 +185,7 @@ class FinancialMLPipeline:
                     log_error("Meta-labeling results not available for test set backtest.")
                     return
                 
-                signals = self.meta_results['final_signals']
-                log_returns = self.final_dataset['log_returns'].reindex(signals.index)
-                
+                signals = self.meta_results['final_signals']                
             elif dataset_range == 'full':
                 # Generate signals for full dataset with proper feature alignment
                 meta_model = None
@@ -212,27 +202,26 @@ class FinancialMLPipeline:
                     best_threshold,
                     training_features=self.training_features
                 )
-                log_returns = self.final_dataset['log_returns']
             else:
                 log_error(f"Unknown dataset_range: {dataset_range}")
                 return
-        else:
-            # Use provided signals - assume full dataset
-            log_returns = self.final_dataset['log_returns'].reindex(signals.index)
         
         # Run signal analysis
         signal_analysis = run_signal_analysis(signals)
-        
-        # Get full returns for buy-and-hold comparison
-        full_returns = None
-        if self.dollar_bars is not None and 'log_returns' in self.dollar_bars.columns:
-            full_returns = self.dollar_bars['log_returns']
-        
+                
         initial_capital = getattr(self.config, 'initial_capital')
         transaction_cost = getattr(self.config, 'transaction_cost_pct')
         pt_sl_multipliers = [getattr(self.config, 'pt'), getattr(self.config, 'sl')]
         risk_fraction = getattr(self.config, 'risk_fraction')
         long_only = getattr(self.config, 'long_only')
+    
+        # Get full returns for buy-and-hold comparison
+        full_returns = None
+        if self.features is not None and 'log_returns' in self.features.columns:
+            full_returns = self.features['log_returns']
+        else:
+            log_error("No log_returns column found in features.")
+            return
     
         # Run backtest
         backtest_results = run_event_driven_backtest(
@@ -243,7 +232,7 @@ class FinancialMLPipeline:
             risk_fraction=risk_fraction,
             transaction_cost_pct=transaction_cost,
             long_only=long_only,
-            full_returns=full_returns  # Pass full returns for proper buy-and-hold
+            full_returns=full_returns
         )
         
         # Store results
